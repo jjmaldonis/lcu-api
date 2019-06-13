@@ -114,7 +114,7 @@ class LCU:
         self.auth_key = self._load_auth_key()
         return self.install_directory, self.port, self.auth_key
 
-    def make_request(self, endpoint):
+    def get(self, endpoint):
         # It will be hard to generalize this. I likely need the swagger because knowing what fields are parameters is otherwise impossible.
         if not self.connected:
             raise LCUDisconnectedError()
@@ -131,12 +131,52 @@ class LCU:
         result = r.json()
         return result
 
+    def post(self, endpoint, data: dict = None):
+        if data is None:
+            data = {}
+        # It will be hard to generalize this. I likely need the swagger because knowing what fields are parameters is otherwise impossible.
+        if not self.connected:
+            raise LCUDisconnectedError()
+        try:
+            r = requests.post(f'{self.lcu_url}:{self.port}{endpoint}',
+                data=data,
+                headers={'Accept': 'application/json', 'Authorization': f'Basic {self.auth_key}'},
+                verify=False)
+        except requests.exceptions.ConnectionError:
+            # Get the current port and try again
+            self._load_startup_data()
+            r = requests.post(f'{self.lcu_url}:{self.port}{endpoint}',
+                data=data,
+                headers={'Accept': 'application/json', 'Authorization': f'Basic {self.auth_key}'},
+                verify=False)
+        return r
+
+    def delete(self, endpoint, data: dict = None):
+        if data is None:
+            data = {}
+        # It will be hard to generalize this. I likely need the swagger because knowing what fields are parameters is otherwise impossible.
+        if not self.connected:
+            raise LCUDisconnectedError()
+        try:
+            r = requests.delete(f'{self.lcu_url}:{self.port}{endpoint}',
+                data=data,
+                headers={'Accept': 'application/json', 'Authorization': f'Basic {self.auth_key}'},
+                verify=False)
+        except requests.exceptions.ConnectionError:
+            # Get the current port and try again
+            self._load_startup_data()
+            r = requests.delete(f'{self.lcu_url}:{self.port}{endpoint}',
+                data=data,
+                headers={'Accept': 'application/json', 'Authorization': f'Basic {self.auth_key}'},
+                verify=False)
+        return r
+
     @property
     def logged_in(self):
         if not self.connected:
             return False
         #try:
-        is_logged_in = self.make_request('/lol-platform-config/v1/initial-configuration-complete')
+        is_logged_in = self.get('/lol-platform-config/v1/initial-configuration-complete')
         return is_logged_in
         #except requests.exceptions.ConnectionError as error:
         #    print("Error in `logged_in`:", error)

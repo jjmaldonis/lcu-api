@@ -28,8 +28,8 @@ lcu.wait_for_login()
 lcu.process_event_stream()
 
 # Here is an example request to get data from the LCU
-response = lcu.get('/lol-platform-config/v1/initial-configuration-complete')
-print("Has the client finished it's starting up?", response)
+finished = lcu.get('/lol-platform-config/v1/initial-configuration-complete')
+print("Has the client finished it's starting up?", finished)
 
 ...  # Make more requests to the LCU if you want.
 

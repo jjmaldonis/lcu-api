@@ -34,15 +34,15 @@ def main():
     lcu.wait_for_login()
 
     # Open a background thread and listen for + process events using the EventProcessors that were attached to the LCU.
-    lcu.process_event_stream()
+    #lcu.process_event_stream()
 
-    # An example request to the LCU.
-    response = lcu.make_request('/lol-platform-config/v1/initial-configuration-complete')
-    print("Has the client finished it's starting up?", response)
+    # Here is an example request to get data from the LCU.
+    finished = lcu.get('/lol-platform-config/v1/initial-configuration-complete')
+    print("Has the client finished it's starting up?", finished)
 
-    # Prevents this program from completing so that the event stream continues to be read.
+    # Prevent this program from exiting so that the event stream continues to be read.
     # Press Ctrl+C (and wait for another event to get triggered by the LCU) to gracefully terminate the program.
-    lcu.wait()
+    #lcu.wait()
 
 
 if __name__ == '__main__':
