@@ -1,6 +1,8 @@
+import types
 import os
 import datetime
 import requests
+import time
 import json
 import abc
 from collections import defaultdict
@@ -44,13 +46,8 @@ class EventProcessor(abc.ABC):
         pass
 
 
-class ClientState:
-    def __init__(self):
-        self.queue_id = -1
-
-
 class LCU:
-    def __init__(self, *processors, client_state: ClientState = None, verbose: bool = VERBOSE):
+    def __init__(self, *processors, verbose: bool = VERBOSE):
         self.verbose = verbose
         self._cache = defaultdict(dict)
         self._processors = []
@@ -70,7 +67,6 @@ class LCU:
         except:
             self.connected = False
 
-        self.client_state = client_state or ClientState()
         for processor in processors:
             self.attach_event_processor(processor)
 
@@ -171,6 +167,26 @@ class LCU:
                 verify=False)
         return r
 
+    def patch(self, endpoint, data: dict = None):
+        if data is None:
+            data = {}
+        # It will be hard to generalize this. I likely need the swagger because knowing what fields are parameters is otherwise impossible.
+        if not self.connected:
+            raise LCUDisconnectedError()
+        try:
+            r = requests.patch(f'{self.lcu_url}:{self.port}{endpoint}',
+                json=json.dumps(data),
+                headers={'Accept': 'application/json', 'Authorization': f'Basic {self.auth_key}'},
+                verify=False)
+        except requests.exceptions.ConnectionError:
+            # Get the current port and try again
+            self._load_startup_data()
+            r = requests.patch(f'{self.lcu_url}:{self.port}{endpoint}',
+                json=json.dumps(data),
+                headers={'Accept': 'application/json', 'Authorization': f'Basic {self.auth_key}'},
+                verify=False)
+        return r
+
     @property
     def logged_in(self):
         if not self.connected:
@@ -230,7 +246,6 @@ class LCU:
                     old_path_contents = new_path_contents
                     win32file.FindNextChangeNotification(change_handle)
                 retried += check_interval
-                self.__check_systray_alive()
                 if retried > timeout:
                     raise TimeoutError(f"Timed out waiting for LCU to open. Waited for {retried} seconds.")
         finally:
@@ -246,7 +261,6 @@ class LCU:
             except LCUClosedError:
                 time.sleep(check_interval)
             retried += check_interval
-            self.__check_systray_alive()
             if retried > timeout:
                     raise TimeoutError(f"Timed out waiting for user to login. Waited for {retried} seconds.")
         return retried
@@ -255,7 +269,7 @@ class LCU:
         if self.install_directory is None:
             print("Waiting for LCU to open from process...")
             retried = self.__wait_for_client_to_open_from_process(check_interval=check_interval, timeout=timeout)
-        else:
+        if self.install_directory is not None:
             print("Waiting for LCU to open from lockfile...")
             retried = self.__wait_for_client_to_open_from_lockfile(check_interval=check_interval, timeout=timeout)
         self.connected = True
@@ -322,27 +336,33 @@ class LCU:
                 thread.kill_received = True
                 return
 
-    def process_event_stream(self):
+    def process_event_stream(self, blocking=False):
         import asyncio
-        import threading
-
-        def loop_in_thread(loop, thread):
-            asyncio.set_event_loop(loop)
+        if blocking:
+            thread = types.SimpleNamespace()
+            thread.kill_received = False  # A flag to notify the thread that it should finish up and exit
+            loop = asyncio.get_event_loop()
             loop.run_until_complete(self.listen(thread))
-        loop = asyncio.get_event_loop()
+        else:
+            import threading
 
-        class Worker(threading.Thread):
-            def __init__(self):
-                threading.Thread.__init__(self)
-                self.kill_received = False  # A flag to notify the thread that it should finish up and exit
-                self.setDaemon(True)
-            def run(self):
-                loop_in_thread(loop, self)
+            def loop_in_thread(loop, thread):
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self.listen(thread))
+            loop = asyncio.get_event_loop()
 
-        #thread = threading.Thread(target=loop_in_thread, args=(loop,))
-        thread = Worker()
-        self._event_stream_thread = thread
-        thread.start()
+            class Worker(threading.Thread):
+                def __init__(self):
+                    threading.Thread.__init__(self)
+                    self.kill_received = False  # A flag to notify the thread that it should finish up and exit
+                    self.setDaemon(True)
+                def run(self):
+                    loop_in_thread(loop, self)
+
+            #thread = threading.Thread(target=loop_in_thread, args=(loop,))
+            thread = Worker()
+            self._event_stream_thread = thread
+            thread.start()
 
     def stop_processing_event_stream(self):
         self._event_stream_thread.kill_received = True
@@ -359,10 +379,16 @@ class LCU:
 
     def attach_event_processor(self, processor: EventProcessor):
         processor.lcu = self
-        processor.client_state = self.client_state
         self._processors.append(processor)
 
     def _process_event(self, event: Event):
         for processor in self._processors:
             if processor.can_handle(event):
                 processor.handle(event)
+
+    def _mock_data_stream(self, filename):
+        with open(filename) as f:
+            for line in f.readlines():
+                event = json.loads(line)
+                event = Event(uri=event['uri'], data=event['data'], created=event['timestamp'])
+                self._process_event(event)
