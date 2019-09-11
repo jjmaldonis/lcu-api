@@ -21,7 +21,7 @@ else:
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from .exceptions import LCUClosedError, LCUDisconnectedError
+from exceptions import LCUClosedError, LCUDisconnectedError
 
 VERBOSE = 1
 
@@ -167,22 +167,22 @@ class LCU:
                 verify=False)
         return r
 
-    def patch(self, endpoint, data: dict = None):
-        if data is None:
-            data = {}
+    def patch(self, endpoint, encoded_data: bytes = None):
+        if encoded_data is None:
+            encoded_data = b'{}'
         # It will be hard to generalize this. I likely need the swagger because knowing what fields are parameters is otherwise impossible.
         if not self.connected:
             raise LCUDisconnectedError()
         try:
             r = requests.patch(f'{self.lcu_url}:{self.port}{endpoint}',
-                json=json.dumps(data),
+                data=encoded_data,
                 headers={'Accept': 'application/json', 'Authorization': f'Basic {self.auth_key}'},
                 verify=False)
         except requests.exceptions.ConnectionError:
             # Get the current port and try again
             self._load_startup_data()
             r = requests.patch(f'{self.lcu_url}:{self.port}{endpoint}',
-                json=json.dumps(data),
+                data=encoded_data,
                 headers={'Accept': 'application/json', 'Authorization': f'Basic {self.auth_key}'},
                 verify=False)
         return r
