@@ -5,7 +5,6 @@ import requests
 import time
 import json
 import abc
-from collections import defaultdict
 if os.name == 'nt':
     WINDOWS = True
     import base64
@@ -49,7 +48,7 @@ class EventProcessor(abc.ABC):
 class LCU:
     def __init__(self, *processors, verbose: bool = VERBOSE):
         self.verbose = verbose
-        self._cache = defaultdict(dict)
+        self._cache = {"TIMEOUT": {}}
         self._processors = []
 
         self.socket_url = 'wss://localhost'
@@ -69,6 +68,19 @@ class LCU:
 
         for processor in processors:
             self.attach_event_processor(processor)
+
+    def cache(self, endpoint: str, timeout: int):
+        """Pass in an endpoint that you want to cache the results of.
+        All calls to `lcu.get` will cache the result (and return the cached result) if the endpoint given to `lcu.get`
+        starts with the endpoint (str) passed into this method.
+
+        The `timeout` parameter specifies how long the data should be kept, in units of seconds.
+
+        It is especially useful to cache summoner results to pull summoner names.
+        Example:  lcu.cache('/lol-summoner/v1/summoners/', 60*5)  # Cache for 5 min, the ~ duration of a lobby
+        """
+        self._cache[endpoint] = {}
+        self._cache["TIMEOUT"][endpoint] = timeout
 
     @staticmethod
     def _get_cmd_args():
@@ -112,6 +124,20 @@ class LCU:
 
     def get(self, endpoint):
         # It will be hard to generalize this. I likely need the swagger because knowing what fields are parameters is otherwise impossible.
+
+        to_cache_result = False
+        for _endpoint in self._cache:
+            if endpoint.startswith(_endpoint):
+                to_cache_result = _endpoint
+                try:
+                    result, inserted = self._cache[_endpoint][endpoint]
+                    if (time.time() - inserted) < self._cache["TIMEOUT"][_endpoint]:
+                        return result
+                    else:
+                        self._cache[_endpoint].pop(endpoint)  # Remove it from the cache
+                except KeyError:
+                    pass
+
         if not self.connected:
             raise LCUDisconnectedError()
         try:
@@ -125,6 +151,10 @@ class LCU:
                 headers={'Accept': 'application/json', 'Authorization': f'Basic {self.auth_key}'},
                 verify=False)
         result = r.json()
+
+        if to_cache_result:
+            self._cache[to_cache_result][endpoint] = (result, time.time())
+
         return result
 
     def post(self, endpoint, data: dict = None):
